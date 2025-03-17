@@ -10,16 +10,22 @@ import ch.admin.bj.swiyu.issuer.management.domain.credentialoffer.TokenStatusLis
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Executable;
+import java.util.Arrays;
+import java.util.Base64;
 import java.util.Random;
 import java.util.zip.DataFormatException;
+import java.util.zip.Deflater;
+import java.util.zip.DeflaterOutputStream;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.*;
+import static org.springframework.boot.actuate.autoconfigure.cloudfoundry.SecurityResponse.success;
 
 public class TestTokenStatusListToken {
     @Test
-    void testCreateNewStatusList_thenSuccess() throws DataFormatException, IOException {
+    void testCreateNewStatusList_thenSuccess() throws IOException {
         /*
          * byte_array = [0xc9, 0x44, 0xf9]
          * encoded:
@@ -99,5 +105,86 @@ public class TestTokenStatusListToken {
         var size_bytes = ((String) claims.get("lst")).length();
         assertTrue(size_bytes < Math.pow(2, 20) * 5);// Smaller than 5MBi to download
 
+    }
+
+    @Test
+    void testStatusListStructure() throws IOException {
+        var statusList = new TokenStatusListToken(2, 4);
+        for (byte statusByte : statusList.getStatusList()) {
+            assertEquals(0, statusByte);
+        }
+        var initialStatusList = statusList.getStatusListData();
+        var loadedStatusList = TokenStatusListToken.loadTokenStatusListToken(2, initialStatusList);
+        // Should be still the same zipped string after loading
+        assertEquals(initialStatusList, loadedStatusList.getStatusListData());
+        // Should be still all 0s
+        for (byte statusByte : statusList.getStatusList()) {
+            assertEquals(0, statusByte);
+        }
+        statusList.setStatus(0, 3);
+        statusList.setStatus(1, 1);
+        statusList.setStatus(2, 1);
+        statusList.setStatus(3, 2);
+        for (byte statusByte : statusList.getStatusList()) {
+            assertNotEquals(0, statusByte);
+        }
+        loadedStatusList = TokenStatusListToken.loadTokenStatusListToken(2, statusList.getStatusListData());
+        assertNotEquals(initialStatusList, loadedStatusList.getStatusListData());
+        loadedStatusList.setStatus(0, 0);
+        loadedStatusList.setStatus(1, 0);
+        loadedStatusList.setStatus(2, 0);
+        loadedStatusList.setStatus(3, 0);
+        assertEquals(initialStatusList, loadedStatusList.getStatusListData());
+        for (byte statusByte : loadedStatusList.getStatusList()) {
+            assertEquals(0, statusByte);
+        }
+        assertThrows(IndexOutOfBoundsException.class, () -> {
+            statusList.setStatus(4, 1);
+        });
+    }
+
+    @Test
+    void testDecodeStatusList_CompressionBomb_IOExceptionExpected() {
+        // Generate a compression bomb
+        byte[] compressionBomb = createCompressionBomb(11534336); // 11MB
+        // Encode in Base64
+        var base64CompressionBomb = Base64.getUrlEncoder().withoutPadding().encodeToString(compressionBomb);
+        // Expect an IOException while decompressing
+        var exception = assertThrows(IOException.class, () -> {
+            TokenStatusListToken.decodeStatusList(base64CompressionBomb);
+        });
+        assertEquals("Decompressed data exceeds safe limit! Possible compression bomb attack.", exception.getMessage());
+    }
+
+    @Test
+    void testDecodeStatusList_CompressionBomb_NoExceptionExpected() {
+        // Generate a compression bomb
+        byte[] compressionBomb = createCompressionBomb(9437184); // 9MB
+        // Encode in Base64
+        var base64CompressionBomb = Base64.getUrlEncoder().withoutPadding().encodeToString(compressionBomb);
+        // Expect no IOException while decompressing, because the safe limit is bigger than the compressed data
+        assertDoesNotThrow(() -> {
+            TokenStatusListToken.decodeStatusList(base64CompressionBomb);
+        });
+    }
+
+    /**
+     * Creates a highly compressed payload (Compression Bomb) that will exceed the safe limit when decompressed.
+     */
+    private byte[] createCompressionBomb(int sizeInBytes) {
+        try (ByteArrayOutputStream byteStream = new ByteArrayOutputStream();
+             // Use deflater with max compression level (9)
+             DeflaterOutputStream deflaterStream = new DeflaterOutputStream(byteStream, new Deflater(9))) {
+
+            byte[] largeData = new byte[sizeInBytes];
+            Arrays.fill(largeData, (byte) 'A');
+
+            deflaterStream.write(largeData);
+            deflaterStream.finish();
+
+            return byteStream.toByteArray();
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create compression bomb", e);
+        }
     }
 }

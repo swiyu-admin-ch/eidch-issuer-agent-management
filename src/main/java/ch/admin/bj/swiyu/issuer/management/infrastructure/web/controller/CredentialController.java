@@ -6,14 +6,19 @@
 
 package ch.admin.bj.swiyu.issuer.management.infrastructure.web.controller;
 
+import java.util.UUID;
+
+import static ch.admin.bj.swiyu.issuer.management.service.CredentialOfferMapper.toCredentialWithDeeplinkResponseDto;
+import static ch.admin.bj.swiyu.issuer.management.service.CredentialOfferMapper.toUpdateStatusResponseDto;
+import static ch.admin.bj.swiyu.issuer.management.service.statusregistry.StatusResponseMapper.toStatusResponseDto;
+
 import ch.admin.bj.swiyu.issuer.management.api.credentialoffer.CreateCredentialRequestDto;
 import ch.admin.bj.swiyu.issuer.management.api.credentialoffer.CredentialWithDeeplinkResponseDto;
 import ch.admin.bj.swiyu.issuer.management.api.credentialofferstatus.CredentialStatusTypeDto;
 import ch.admin.bj.swiyu.issuer.management.api.credentialofferstatus.StatusResponseDto;
 import ch.admin.bj.swiyu.issuer.management.api.credentialofferstatus.UpdateStatusResponseDto;
-import ch.admin.bj.swiyu.issuer.management.domain.credentialoffer.CredentialOffer;
-import ch.admin.bj.swiyu.issuer.management.service.CredentialOfferMapper;
 import ch.admin.bj.swiyu.issuer.management.service.CredentialService;
+import io.micrometer.core.annotation.Timed;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.enums.ParameterIn;
@@ -24,20 +29,9 @@ import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PatchMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
-
-import static ch.admin.bj.swiyu.issuer.management.service.CredentialOfferMapper.toCredentialWithDeeplinkResponseDto;
-import static ch.admin.bj.swiyu.issuer.management.service.CredentialOfferMapper.toUpdateStatusResponseDto;
-import static ch.admin.bj.swiyu.issuer.management.service.statusregistry.StatusResponseMapper.toStatusResponseDto;
 
 @RestController
 @RequestMapping(value = {"/api/v1/credentials"})
@@ -47,6 +41,7 @@ public class CredentialController {
 
     private final CredentialService credentialService;
 
+    @Timed
     @PostMapping("")
     @Operation(
             summary = "Create a generic credential offer with the given content",
@@ -71,15 +66,11 @@ public class CredentialController {
                     )
             }
     )
-    public CredentialWithDeeplinkResponseDto createCredential(
-            @Valid @RequestBody CreateCredentialRequestDto requestDto) {
-        CredentialOffer credential = this.credentialService.createCredential(requestDto);
-
-        String offerLinkString = this.credentialService.getOfferDeeplinkFromCredential(credential);
-
-        return CredentialOfferMapper.toCredentialWithDeeplinkResponseDto(credential, offerLinkString);
+    public CredentialWithDeeplinkResponseDto createCredential(@Valid @RequestBody CreateCredentialRequestDto request) {
+        return this.credentialService.createCredential(request);
     }
 
+    @Timed
     @GetMapping("/{credentialId}")
     @Operation(
             summary = "Get the offer data, if any is still cached",
@@ -103,9 +94,10 @@ public class CredentialController {
             }
     )
     public Object getCredentialOffer(@PathVariable UUID credentialId) {
-        return toCredentialWithDeeplinkResponseDto(this.credentialService.getCredential(credentialId));
+        return this.credentialService.getCredentialOffer(credentialId);
     }
 
+    @Timed
     @GetMapping("/{credentialId}/offer_deeplink")
     @Operation(
             summary = "Get the offer deeplink",
@@ -119,7 +111,7 @@ public class CredentialController {
                                             @ExampleObject(
                                                     name = "Offer deeplink",
                                                     summary = "Example of a deeplink",
-                                                    value = "openid-credential-offer://?credential_offer=%7B%22grants%22%3A%7B%22urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Apre-authorized_code%22%3A%7B%22pre-authorized_code%22%3A%22b614c966-0c1d-4636-9aec-e2496d242d25%22%7D%7D%2C%22credential_issuer%22%3A%22https%3A%2F%2Fissuer-agent-oid4vci-d.bit.admin.ch%22%2C%22credential_configuration_ids%22%3A%5B%22myIssuerMetadataCredentialSupportedId%22%5D%7D"
+                                                    value = "swiyu://?credential_offer=%7B%22grants%22%3A%7B%22urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Apre-authorized_code%22%3A%7B%22pre-authorized_code%22%3A%22b614c966-0c1d-4636-9aec-e2496d242d25%22%7D%7D%2C%22credential_issuer%22%3A%22https%3A%2F%2Fissuer-agent-oid4vci-d.bit.admin.ch%22%2C%22credential_configuration_ids%22%3A%5B%22myIssuerMetadataCredentialSupportedId%22%5D%7D"
                                             )
                                     }
                             )
@@ -132,28 +124,23 @@ public class CredentialController {
             }
     )
     public String getCredentialOfferDeeplink(@PathVariable UUID credentialId) {
-        CredentialOffer credential = this.credentialService.getCredential(credentialId);
-
-        return this.credentialService.getOfferDeeplinkFromCredential(credential);
+        return this.credentialService.getCredentialOfferDeeplink(credentialId);
     }
 
+    @Timed
     @GetMapping("/{credentialId}/status")
     @Operation(summary = "Get the current status of an offer or the verifiable credential, if already issued.")
     public StatusResponseDto getCredentialStatus(@PathVariable UUID credentialId) {
-        CredentialOffer credential = this.credentialService.getCredential(credentialId);
-
-        return toStatusResponseDto(credential);
+        return this.credentialService.getCredentialStatus(credentialId);
     }
 
+    @Timed
     @PatchMapping("/{credentialId}/status")
     @Operation(summary = "Set the status of an offer or the verifiable credential associated with the id.")
     public UpdateStatusResponseDto updateCredentialStatus(@PathVariable UUID credentialId,
                                                           @Parameter(in = ParameterIn.QUERY, schema = @Schema(implementation = CredentialStatusTypeDto.class))
                                                           @RequestParam("credentialStatus") CredentialStatusTypeDto credentialStatus) {
 
-        CredentialOffer credential = this.credentialService.updateCredentialStatus(credentialId,
-                credentialStatus);
-
-        return toUpdateStatusResponseDto(credential);
+        return this.credentialService.updateCredentialStatus(credentialId, credentialStatus);
     }
 }

@@ -10,15 +10,13 @@ import ch.admin.bj.swiyu.issuer.management.common.exception.ConfigurationExcepti
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Map;
-import java.util.zip.DataFormatException;
-import java.util.zip.Deflater;
-import java.util.zip.DeflaterOutputStream;
-import java.util.zip.InflaterOutputStream;
+import java.util.zip.*;
 
 /**
  * See <a href=
@@ -28,6 +26,8 @@ import java.util.zip.InflaterOutputStream;
 @Slf4j
 @Getter
 public class TokenStatusListToken {
+
+    private static final int MAX_UNCOMPRESSED_SIZE_IN_BYTES = 10485760; // 10MB
 
     /**
      * Indicator how many consecutive bits of the token status list are contained
@@ -50,7 +50,7 @@ public class TokenStatusListToken {
      */
     public TokenStatusListToken(int bits, int statusListLength) {
         this.bits = bits;
-        statusList = new byte[statusListLength];
+        statusList = new byte[(int) Math.ceil(statusListLength * bits / 8.0)];
     }
 
     /**
@@ -85,22 +85,41 @@ public class TokenStatusListToken {
     }
 
     /**
-     * @param lst
-     * @return the bytes of the status list
-     * @throws DataFormatException if the lst is not a zlib compressed status list
+     * Decodes and decompresses a Base64-encoded and compressed status list.
+     *
+     * <p>This method performs the following steps:
+     * <ul>
+     *     <li>Decodes the input string using Base64 decoding.</li>
+     *     <li>Decompresses the deflated data using a {@link InflaterInputStream}.</li>
+     *     <li>Ensures that the decompressed data does not exceed a predefined safe limit to prevent potential compression bomb attacks.</li>
+     * </ul>
+     *
+     * @param lst The Base64-encoded and deflate-compressed input string.
+     * @return A byte array containing the decompressed data.
+     * @throws IOException If an error occurs during decoding, decompression, or if the decompressed data exceeds the allowed limit.
      */
-    private static byte[] decodeStatusList(String lst) throws IOException {
-        // base64 decoding the data
+    public static byte[] decodeStatusList(String lst) throws IOException {
         byte[] zippedData = Base64.getUrlDecoder().decode(lst);
 
-        var zlibOutput = new ByteArrayOutputStream();
-        var inflaterStream = new InflaterOutputStream(zlibOutput);
-        inflaterStream.write(zippedData);
-        inflaterStream.finish();
-        byte[] clippedZlibOutput = Arrays.copyOf(zlibOutput.toByteArray(), zlibOutput.size());
-        inflaterStream.close();
-        return clippedZlibOutput;
+        try (ByteArrayInputStream byteArrayInputStream = new ByteArrayInputStream(zippedData);
+             InflaterInputStream inflaterStream = new InflaterInputStream(byteArrayInputStream);
+             ByteArrayOutputStream output = new ByteArrayOutputStream()) {
 
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+            int totalSize = 0; // Track total decompressed data size
+
+            // Check if the decompressed data size exceeds the allowed limit
+            while ((bytesRead = inflaterStream.read(buffer)) != -1) {
+                totalSize += bytesRead;
+                if (totalSize > MAX_UNCOMPRESSED_SIZE_IN_BYTES) {
+                    throw new IOException("Decompressed data exceeds safe limit! Possible compression bomb attack.");
+                }
+                output.write(buffer, 0, bytesRead);
+            }
+            // Return the fully decompressed byte array
+            return output.toByteArray();
+        }
     }
 
     /**
@@ -170,11 +189,11 @@ public class TokenStatusListToken {
     }
 
     public boolean canRevoke() {
-        return bits >= TokenStatsListBit.REVOKE.getValue();
+        return bits >= TokenStatusListBit.REVOKE.getValue();
     }
 
     public boolean canSuspend() {
-        return bits >= TokenStatsListBit.SUSPEND.getValue();
+        return bits >= TokenStatusListBit.SUSPEND.getValue();
     }
 
     /**
@@ -197,8 +216,12 @@ public class TokenStatusListToken {
         }
     }
 
-    private byte getStatusEntryByte(int idx) {
-        return statusList[idx * bits / 8];
+    private byte getStatusEntryByte(int idx) throws IndexOutOfBoundsException {
+        try {
+            return statusList[idx * bits / 8];
+        } catch (ArrayIndexOutOfBoundsException e) {
+            throw new IndexOutOfBoundsException("Status List Index %d out of bounds (Max size %d)".formatted(idx, statusList.length * bits));
+        }
     }
 
     /**
