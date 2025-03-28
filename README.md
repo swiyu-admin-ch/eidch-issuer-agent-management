@@ -53,9 +53,10 @@ flowchart TD
 >
 > - Generated the signing keys file with the didtoolbox.jar
 > - Generated a DID which is registered on the identifier registry
-> - Registered yourself on the swiyuprobeta portal
+> - Registered yourself on the ePortal
 > - Registered yourself on the api self service portal
 
+> The steps are explained in the [onboarding to the base and trust registry cookbook](https://swiyu-admin-ch.github.io/cookbooks/onboarding-base-and-trust-registry/)
 > Are you a third-party user? Then you're right here! Otherwhise go to [gov internal usage](#Gov-internal-usage)
 
 ## 1. Set the environment variables
