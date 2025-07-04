@@ -19,6 +19,8 @@ RUN set -uxe && \
     chmod g=u /app/entrypoint.sh &&\
     chmod +x /app/entrypoint.sh
 
+EXPOSE 8080
+
 WORKDIR /app
 
 USER 1001
